@@ -1,150 +1,125 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-function createTextSprite(text, color = '#ffffff') {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  
-  ctx.font = 'Bold 48px sans-serif';
-  ctx.fillStyle = color;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, 128, 64);
+export function createBlochSphere(container) {
+  const width = container.clientWidth || 380;
+  const height = container.clientHeight || 380;
 
-  const texture = new THREE.CanvasTexture(canvas);
-  const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
-  const sprite = new THREE.Sprite(material);
-  sprite.scale.set(0.4, 0.2, 1);
-  return sprite;
-}
-
-/**
- * Converts complex statevector amplitudes c0 and c1 to Bloch (x, y, z)
- */
-export function statevectorToBloch(c0, c1) {
-  const normSq = (c0.re ** 2 + c0.im ** 2) + (c1.re ** 2 + c1.im ** 2);
-  const norm = Math.sqrt(normSq) || 1;
-
-  const a0 = c0.re / norm;
-  const b0 = c0.im / norm;
-  const a1 = c1.re / norm;
-  const b1 = c1.im / norm;
-
-  return {
-    x: 2 * (a0 * a1 + b0 * b1),
-    y: 2 * (a0 * b1 - b0 * a1),
-    z: (a0 ** 2 + b0 ** 2) - (a1 ** 2 + b1 ** 2)
-  };
-}
-
-export function createBlochSphere(containerElement) {
-  const width = containerElement.clientWidth || 400;
-  const height = containerElement.clientHeight || 400;
-
-  // 1. Scene & Camera Setup
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-  camera.position.set(2.8, 2.2, 3.2);
+  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+  camera.position.set(2.4, 1.8, 3.2);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setSize(width, height);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  containerElement.innerHTML = '';
-  containerElement.appendChild(renderer.domElement);
+  renderer.setClearColor(0x171717, 0); // Transparent background
+  container.appendChild(renderer.domElement);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
 
-  // 2. Translucent Sphere & Equator
-  const sphereGeo = new THREE.SphereGeometry(1, 32, 32);
+  const sphereGroup = new THREE.Group();
+  scene.add(sphereGroup);
+
+  // 1. Clean Outer Wireframe Shell
+  const sphereGeo = new THREE.SphereGeometry(1, 32, 24);
   const sphereMat = new THREE.MeshBasicMaterial({
-    color: 0x6366f1,
+    color: 0x00e5a3,
+    wireframe: true,
     transparent: true,
-    opacity: 0.12,
-    wireframe: true
+    opacity: 0.22
   });
-  scene.add(new THREE.Mesh(sphereGeo, sphereMat));
+  const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
+  sphereGroup.add(sphereMesh);
 
-  // Equator Guide Ring (Quantum X-Y plane)
-  const ringGeo = new THREE.RingGeometry(0.995, 1.005, 64);
-  const ringMat = new THREE.MeshBasicMaterial({ color: 0x64748b, side: THREE.DoubleSide });
-  const equatorRing = new THREE.Mesh(ringGeo, ringMat);
-  equatorRing.rotation.x = Math.PI / 2;
-  scene.add(equatorRing);
+  // 2. Translucent Inner Core
+  const innerSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.99, 32, 24),
+    new THREE.MeshBasicMaterial({ color: 0x1f1f1f, transparent: true, opacity: 0.3 })
+  );
+  sphereGroup.add(innerSphere);
 
-  // 3. Coordinate Axes & Labels
-  // Quantum Z -> Three.js Y, Quantum X -> Three.js X, Quantum Y -> Three.js Z
-  const axesConfig = [
-    { dir: new THREE.Vector3(0, 1, 0), color: '#3b82f6', label: '|0⟩ (+Z)', labelPos: new THREE.Vector3(0, 1.3, 0) },
-    { dir: new THREE.Vector3(0, -1, 0), color: '#3b82f6', label: '|1⟩ (-Z)', labelPos: new THREE.Vector3(0, -1.3, 0) },
-    { dir: new THREE.Vector3(1, 0, 0), color: '#ef4444', label: '|+⟩ (+X)', labelPos: new THREE.Vector3(1.3, 0, 0) },
-    { dir: new THREE.Vector3(-1, 0, 0), color: '#ef4444', label: '|-⟩ (-X)', labelPos: new THREE.Vector3(-1.3, 0, 0) },
-    { dir: new THREE.Vector3(0, 0, 1), color: '#10b981', label: '|i+⟩ (+Y)', labelPos: new THREE.Vector3(0, 0, 1.3) },
-    { dir: new THREE.Vector3(0, 0, -1), color: '#10b981', label: '|i-⟩ (-Y)', labelPos: new THREE.Vector3(0, 0, -1.3) }
-  ];
-
-  axesConfig.forEach(({ dir, color, label, labelPos }) => {
-    const lineGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      dir.clone().multiplyScalar(1.15)
-    ]);
-    const lineMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.6 });
-    scene.add(new THREE.Line(lineGeo, lineMat));
-
-    const sprite = createTextSprite(label, color);
-    sprite.position.copy(labelPos);
-    scene.add(sprite);
-  });
-
-  // 4. Dynamic State Vector Arrow
-  const currentDir = new THREE.Vector3(0, 1, 0); // Default |0⟩
-  const targetDir = new THREE.Vector3(0, 1, 0);
-  const vectorArrow = new THREE.ArrowHelper(currentDir, new THREE.Vector3(0, 0, 0), 1.0, 0xf59e0b, 0.15, 0.08);
-  scene.add(vectorArrow);
-
-  // 5. Update State Function (Interpolated Animation)
-  function updateState(c0, c1) {
-    const { x, y, z } = statevectorToBloch(c0, c1);
-    // Map to Three.js axis space (X -> x, Y -> z, Z -> y)
-    targetDir.set(x, z, y).normalize();
+  // 3. Equator Ring (Amber Accent)
+  const equatorPoints = [];
+  for (let i = 0; i <= 64; i++) {
+    const t = (i / 64) * Math.PI * 2;
+    equatorPoints.push(new THREE.Vector3(Math.cos(t), 0, Math.sin(t)));
   }
+  const equatorGeo = new THREE.BufferGeometry().setFromPoints(equatorPoints);
+  const equatorLine = new THREE.Line(
+    equatorGeo,
+    new THREE.LineBasicMaterial({ color: 0xf5a623, transparent: true, opacity: 0.65 })
+  );
+  sphereGroup.add(equatorLine);
 
-  // Handle Container Resizing
-  const resizeObserver = new ResizeObserver(() => {
-    const w = containerElement.clientWidth;
-    const h = containerElement.clientHeight;
-    if (w && h) {
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    }
-  });
-  resizeObserver.observe(containerElement);
+  // 4. Coordinate Axes (X, Z, Y)
+  const createAxis = (start, end, colorHex) => {
+    const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
+    return new THREE.Line(geo, new THREE.LineBasicMaterial({ color: colorHex, opacity: 0.45, transparent: true }));
+  };
+  sphereGroup.add(createAxis(new THREE.Vector3(-1.25, 0, 0), new THREE.Vector3(1.25, 0, 0), 0xe74c4c)); // X
+  sphereGroup.add(createAxis(new THREE.Vector3(0, -1.25, 0), new THREE.Vector3(0, 1.25, 0), 0xf5a623)); // Z
+  sphereGroup.add(createAxis(new THREE.Vector3(0, 0, -1.25), new THREE.Vector3(0, 0, 1.25), 0x00d2ff)); // Y
 
-  // Render & Animation Loop
-  let isRunning = true;
-  function animate() {
-    if (!isRunning) return;
-    requestAnimationFrame(animate);
+  // 5. Target State Marker (Translucent Golden Beacon)
+  const targetMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true, opacity: 0.85 })
+  );
+  targetMarker.position.set(0, 1, 0); // Default |0⟩
+  sphereGroup.add(targetMarker);
 
-    // Smooth spherical slerp/lerp transition toward target state
-    currentDir.lerp(targetDir, 0.1).normalize();
-    vectorArrow.setDirection(currentDir);
+  // 6. Current State Vector Arrow (Electric Red)
+  let currentDir = new THREE.Vector3(0, 1, 0);
+  let targetDir = new THREE.Vector3(0, 1, 0);
+  const arrow = new THREE.ArrowHelper(currentDir, new THREE.Vector3(0, 0, 0), 1, 0xe74c4c, 0.16, 0.08);
+  sphereGroup.add(arrow);
 
+  let reqId;
+  const animateLoop = () => {
+    reqId = requestAnimationFrame(animateLoop);
     controls.update();
+
+    currentDir.lerp(targetDir, 0.18).normalize();
+    arrow.setDirection(currentDir);
+
     renderer.render(scene, camera);
-  }
-  animate();
+  };
+  animateLoop();
 
-  // Cleanup handler for React/Vue unmounts
-  function destroy() {
-    isRunning = false;
-    resizeObserver.disconnect();
-    renderer.dispose();
-    containerElement.innerHTML = '';
-  }
+  return {
+    triggerExplosion: () => {},
+    setScrollProgress: (progress) => {
+      // Rotate whole sphere as user scrolls
+      sphereGroup.rotation.y = progress * Math.PI * 4;
+      sphereGroup.rotation.x = Math.sin(progress * Math.PI * 2) * 0.35;
 
-  return { updateState, destroy };
+      // Animate vector dynamically through scroll positions
+      const theta = progress * Math.PI;
+      const phi = progress * Math.PI * 3;
+      const x = Math.sin(theta) * Math.cos(phi);
+      const y = Math.sin(theta) * Math.sin(phi);
+      const z = Math.cos(theta);
+      targetDir.set(x, z, -y).normalize();
+    },
+    updateState: (c0, c1) => {
+      const x = 2 * (c0.re * c1.re + c0.im * c1.im);
+      const y = 2 * (c1.im * c0.re - c1.re * c0.im);
+      const z = (c0.re ** 2 + c0.im ** 2) - (c1.re ** 2 + c1.im ** 2);
+      targetDir.set(x, z, -y).normalize();
+    },
+    updateTargetMarker: (targetCoords) => {
+      if (targetCoords) {
+        targetMarker.position.set(targetCoords.x, targetCoords.z, -targetCoords.y);
+      }
+    },
+    destroy: () => {
+      cancelAnimationFrame(reqId);
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+    }
+  };
 }
